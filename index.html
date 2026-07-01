@@ -117,6 +117,9 @@ textarea{width:100%;background:var(--bg3);border:1px solid var(--border);color:v
 
 .empty-state{text-align:center;padding:48px;color:var(--text2);font-size:.88rem;border:1px dashed var(--border);margin-bottom:12px}
 .empty-state .big{font-size:2rem;margin-bottom:10px;opacity:.4}
+.str-inline{display:flex;align-items:center;gap:8px;min-width:210px}
+.str-slider{flex:1;accent-color:var(--gold);cursor:pointer}
+.sval{font-size:11px;min-width:104px;color:var(--t2);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -187,7 +190,7 @@ let rules=[],nextId=1;
 function makeRule(){
   return{id:nextId++,enabled:true,expanded:true,logic:'OR',
     triggers:[{wheel:'',segment:''}],
-    targets:[{wheel:'',segment:'',direction:'suppress',multiplier:0.3}]};
+    targets:[{wheel:'',segment:'',strength:0}]};
 }
 
 function init(){populateFilter();renderRules();updateStats();}
@@ -225,7 +228,7 @@ function setLogic(rid,logic){
   updateSummary(rid);
 }
 
-function addTarget(rid){const r=rules.find(r=>r.id===rid);if(!r)return;r.targets.push({wheel:'',segment:'',direction:'suppress',multiplier:0.3});rerenderBody(rid);}
+function addTarget(rid){const r=rules.find(r=>r.id===rid);if(!r)return;r.targets.push({wheel:'',segment:'',strength:0});rerenderBody(rid);}
 function removeTarget(rid,i){const r=rules.find(r=>r.id===rid);if(!r||r.targets.length<=1)return;r.targets.splice(i,1);rerenderBody(rid);}
 function updateTarget(rid,i,field,val){
   const r=rules.find(r=>r.id===rid);if(!r)return;
@@ -233,31 +236,21 @@ function updateTarget(rid,i,field,val){
   if(field==='wheel'){r.targets[i].segment='';const s=document.getElementById('tarseg-'+rid+'-'+i);if(s)s.innerHTML=segOpts(val,'');}
   updateSummary(rid);updateStats();
 }
-function setTargetDir(rid,i,dir){
+function updateTargetStr(rid,i,val){
   const r=rules.find(r=>r.id===rid);if(!r)return;
-  r.targets[i].direction=dir;
-  const w=document.getElementById('dir-'+rid+'-'+i);
-  if(w)w.querySelectorAll('.dir-btn').forEach(b=>{b.className='dir-btn';if(b.dataset.dir===dir)b.className+=' '+(dir==='suppress'?'active-suppress':'active-boost');});
+  r.targets[i].strength=parseFloat(val);
+  const sv=document.getElementById('sv-'+rid+'-'+i); if(sv)sv.textContent=strLabel(val);
   updateSummary(rid);updateStats();
 }
-function updateTargetMult(rid,i,val){
-  const r=rules.find(r=>r.id===rid);if(!r)return;
-  r.targets[i].multiplier=parseFloat(val);
-  const mv=document.getElementById('mv-'+rid+'-'+i);
-  if(mv)mv.textContent=parseFloat(val).toFixed(2)+'×';
-  updateSummary(rid);
-}
+function strLabel(s){ s=parseFloat(s)||0; if(Math.abs(s)<0.005) return '● no change'; if(s>0) return '▲ boost '+Math.round(s*100)+'%'+(s>=0.995?' (~99%)':''); return '▼ suppress '+Math.round(-s*100)+'%'+(s<=-0.995?' (never)':''); }
+function updateTargetMult(){}
 function applyAllMult(rid){
   const r=rules.find(r=>r.id===rid);if(!r)return;
   const v=parseFloat(document.getElementById('amaster-'+rid).value);
-  r.targets.forEach((t,i)=>{
-    t.multiplier=v;
-    const sl=document.getElementById('ms-'+rid+'-'+i);const mv=document.getElementById('mv-'+rid+'-'+i);
-    if(sl)sl.value=v;if(mv)mv.textContent=v.toFixed(2)+'×';
-  });
+  r.targets.forEach((t,i)=>{ t.strength=v; const sl=document.getElementById('str-'+rid+'-'+i); const sv=document.getElementById('sv-'+rid+'-'+i); if(sl)sl.value=v; if(sv)sv.textContent=strLabel(v); });
   updateSummary(rid);
 }
-function updateMasterVal(rid,val){const mv=document.getElementById('amv-'+rid);if(mv)mv.textContent=parseFloat(val).toFixed(2)+'×';}
+function updateMasterVal(rid,val){const mv=document.getElementById('amv-'+rid);if(mv)mv.textContent=strLabel(val);}
 
 function segOpts(wid,sel){
   if(!wid||!WHEELS[wid])return'<option value="">— Select wheel first —</option>';
@@ -331,13 +324,9 @@ function buildBodyHTML(r){
         ${WHEEL_IDS.map(w=>`<option value="${w}"${t.wheel===w?' selected':''}>${WHEELS[w].name}</option>`).join('')}
       </select>
       <select id="tarseg-${id}-${i}" onchange="updateTarget(${id},${i},'segment',this.value)">${segOpts(t.wheel,t.segment)}</select>
-      <div class="dir-toggle" id="dir-${id}-${i}">
-        <button class="dir-btn${t.direction==='suppress'?' active-suppress':''}" data-dir="suppress" onclick="setTargetDir(${id},${i},'suppress')" title="Suppress">▼</button>
-        <button class="dir-btn${t.direction==='boost'?' active-boost':''}" data-dir="boost" onclick="setTargetDir(${id},${i},'boost')" title="Boost">▲</button>
-      </div>
-      <div class="mult-inline">
-        <input type="range" min="0.05" max="5" step="0.05" value="${t.multiplier}" id="ms-${id}-${i}" oninput="updateTargetMult(${id},${i},this.value)">
-        <span class="mval" id="mv-${id}-${i}">${t.multiplier.toFixed(2)}×</span>
+      <div class="str-inline">
+        <input type="range" min="-1" max="1" step="0.01" value="${(typeof t.strength==='number'?t.strength:0)}" id="str-${id}-${i}" class="str-slider" oninput="updateTargetStr(${id},${i},this.value)">
+        <span class="sval" id="sv-${id}-${i}">${strLabel(typeof t.strength==='number'?t.strength:0)}</span>
       </div>
       <button class="btn-icon" onclick="removeTarget(${id},${i})"${r.targets.length<=1?' disabled':''}>✕</button>
     </div>`).join('');
@@ -359,8 +348,8 @@ function buildBodyHTML(r){
       <div class="sec-label">Targets</div>
       <div class="apply-all-bar">
         <label>Apply to all:</label>
-        <input type="range" min="0.05" max="5" step="0.05" value="0.3" id="amaster-${id}" oninput="updateMasterVal(${id},this.value)">
-        <span class="aval" id="amv-${id}">0.30×</span>
+        <input type="range" min="-1" max="1" step="0.01" value="0" id="amaster-${id}" oninput="updateMasterVal(${id},this.value)">
+        <span class="aval" id="amv-${id}">● no change</span>
         <button class="btn btn-gold btn-sm" onclick="applyAllMult(${id})">Apply All</button>
       </div>
       ${targRows}
@@ -373,10 +362,10 @@ function getSummary(r){
   const va=r.targets.filter(t=>t.wheel&&t.segment);
   if(!vt.length||!va.length)return'Incomplete rule — fill in triggers and targets';
   const tp=vt.map(t=>`${WHEELS[t.wheel]?.name||t.wheel}="${t.segment}"`).join(` ${r.logic} `);
-  const sc=va.filter(t=>t.direction==='suppress').length;
-  const bc=va.filter(t=>t.direction==='boost').length;
+  const sc=va.filter(t=>(typeof t.strength==='number'?t.strength:0)<0).length;
+  const bc=va.filter(t=>(typeof t.strength==='number'?t.strength:0)>0).length;
   const p=[];if(sc)p.push(`▼ ${sc} suppress`);if(bc)p.push(`▲ ${bc} boost`);
-  return`IF ${tp} → ${p.join(', ')}`;
+  return`IF ${tp} → ${p.join(', ')||'no change'}`;
 }
 
 function updateSummary(id){
@@ -406,10 +395,10 @@ function exportJSON(){
       enabled:r.enabled!==false,
       logic:r.logic||'OR',
       triggers:vt.map(t=>({wheel:t.wheel,segment:t.segment})),
-      targets:va.map(t=>({wheel:t.wheel,segment:t.segment,direction:t.direction,multiplier:t.multiplier}))
+      targets:va.map(t=>({wheel:t.wheel,segment:t.segment,strength:(typeof t.strength==='number'?t.strength:0)}))
     });
   });
-  const data={version:'2.1',exported:new Date().toISOString(),rules:out};
+  const data={version:'2.2',exported:new Date().toISOString(),rules:out};
   document.getElementById('exportText').value=JSON.stringify(data,null,2);
   document.getElementById('exportPanel').classList.add('show');
   document.getElementById('exportPanel').scrollIntoView({behavior:'smooth'});
@@ -439,7 +428,7 @@ function handleImport(e){
         const rule=makeRule();
         rule.enabled=r.enabled??true;rule.expanded=false;rule.logic=r.logic||'OR';
         rule.triggers=r.triggers||[{wheel:r.triggerWheel||'',segment:r.triggerSegment||''}];
-        rule.targets=r.targets||[{wheel:r.targetWheel||'',segment:r.targetSegment||'',direction:r.direction||'suppress',multiplier:r.multiplier||0.3}];
+        rule.targets=(r.targets||[{wheel:r.targetWheel||'',segment:r.targetSegment||''}]).map(t=>({wheel:t.wheel||'',segment:t.segment||'',strength:(typeof t.strength==='number'?t.strength:(typeof t.multiplier==='number'?(t.multiplier<1?-(1-t.multiplier):Math.min((t.multiplier-1)/4,1)):0))}));
         return rule;
       });
       renderRules();updateStats();alert(`Imported ${rules.length} rules.`);
@@ -452,36 +441,24 @@ function loadWheelHTML(e){
   const file=e.target.files[0];if(!file)return;
   const reader=new FileReader();
   reader.onload=ev=>{
+    const st=document.getElementById('wheelStatus');
     try{
-      const html=ev.target.result;const newWheels={};
-      const nameRx=/\b([a-z][a-z0-9_]{1,})\s*:\s*\{\s*name\s*:\s*['"]([^'"]{1,80})['"]/g;
-      let nm;
-      while((nm=nameRx.exec(html))!==null){
-        const id=nm[1],name=nm[2];
-        if(!['const','let','var','true','false','function'].includes(id))newWheels[id]={name,segments:[]};
-      }
-      Object.keys(newWheels).forEach(id=>{
-        const rx=new RegExp(id+'\\s*:\\s*\\{\\s*name\\s*:[^,]+,\\s*segments\\s*:\\s*\\[');
-        const m=rx.exec(html);if(!m)return;
-        let pos=m.index+m[0].length,depth=1;
-        while(pos<html.length&&depth>0){if(html[pos]==='[')depth++;else if(html[pos]===']')depth--;pos++;}
-        const block=html.slice(m.index+m[0].length,pos-1);
-        newWheels[id].segments=[...block.matchAll(/label\s*:\s*['"]([^'"]+)['"]/g)].map(s=>s[1]);
-      });
-      Object.keys(newWheels).forEach(id=>{if(!newWheels[id].segments.length)delete newWheels[id];});
-      const count=Object.keys(newWheels).length;
-      if(!count)throw new Error('No wheels found');
-      Object.keys(WHEELS).forEach(k=>delete WHEELS[k]);Object.assign(WHEELS,newWheels);
-      WHEEL_IDS.length=0;Object.keys(newWheels).forEach(id=>WHEEL_IDS.push(id));
-      populateFilter();renderRules();
-      document.getElementById('wheelStatus').textContent=`✓ ${count} wheels loaded`;
-      document.getElementById('wheelStatus').style.color='var(--green)';
-    }catch(err){
-      document.getElementById('wheelStatus').textContent='✗ '+err.message;
-      document.getElementById('wheelStatus').style.color='var(--accent)';
-    }
+      const html=ev.target.result;
+      const ki=html.indexOf('WHEEL_DEFS'); if(ki<0) throw new Error('WHEEL_DEFS not found');
+      const bi=html.indexOf('{',ki); let d=0,p=bi;
+      for(;p<html.length;p++){const c=html[p]; if(c==='{')d++; else if(c==='}'){d--; if(d===0){p++;break;}}}
+      const lit=html.slice(bi,p);
+      const defs=(new Function('return ('+lit+')'))();
+      const nw={};
+      Object.keys(defs).forEach(id=>{const wd=defs[id]; if(wd&&wd.name&&Array.isArray(wd.segments)) nw[id]={name:wd.name,segments:wd.segments.map(s=>typeof s==='string'?s:s.label)};});
+      const count=Object.keys(nw).length; if(!count) throw new Error('No wheels parsed');
+      Object.keys(WHEELS).forEach(k=>delete WHEELS[k]); Object.assign(WHEELS,nw);
+      WHEEL_IDS.length=0; Object.keys(nw).forEach(id=>WHEEL_IDS.push(id));
+      populateFilter(); renderRules(); updateStats();
+      if(st){st.textContent='✓ '+count+' wheels loaded'; st.style.color='var(--green)';}
+    }catch(err){ if(st){st.textContent='✗ '+err.message; st.style.color='var(--accent)';} }
   };
-  reader.readAsText(file);e.target.value='';
+  reader.readAsText(file); e.target.value='';
 }
 
 init();
