@@ -83,6 +83,10 @@ select option{background:var(--bg3);color:var(--text)}
 .logic-btn{padding:5px 14px;background:transparent;border:none;color:var(--text2);font-size:.75rem;font-family:inherit;cursor:pointer;transition:all .2s;text-transform:uppercase;letter-spacing:1px}
 .logic-btn.active-or{background:rgba(184,146,11,.2);color:var(--gold)}
 .logic-btn.active-and{background:rgba(140,70,200,.2);color:#cc88ff}
+.logic-btn.active-levels{background:rgba(60,180,100,.2);color:#5cfa96}
+.level-group{border:1px solid var(--border);border-left:3px solid #5cfa96;padding:10px;margin-bottom:8px;background:var(--bg3)}
+.level-group-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:.68rem;color:#5cfa96;text-transform:uppercase;letter-spacing:1px}
+.level-and-divider{text-align:center;font-size:.65rem;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin:6px 0;font-weight:700}
 .logic-hint{font-size:.7rem;color:var(--text2);font-style:italic}
 
 /* TRIGGER ROWS */
@@ -221,11 +225,11 @@ function updateTrigger(rid,i,field,val){
 function setLogic(rid,logic){
   const r=rules.find(r=>r.id===rid);if(!r)return;
   r.logic=logic;
-  const w=document.getElementById('logic-'+rid);
-  if(w)w.querySelectorAll('.logic-btn').forEach(b=>{b.className='logic-btn';if(b.dataset.logic===logic)b.className+=' '+(logic==='OR'?'active-or':'active-and');});
-  const h=document.getElementById('lhint-'+rid);
-  if(h)h.textContent=logic==='OR'?'Any condition fires the rule':'All conditions must fire together';
-  updateSummary(rid);
+  if(logic==='LEVELS'&&(!Array.isArray(r.levels)||!r.levels.length)){
+    const seed=r.triggers.filter(t=>t.wheel&&t.segment);
+    r.levels=[seed.length?seed.map(t=>({...t})):[{wheel:'',segment:''}]];
+  }
+  rerenderBody(rid);
 }
 
 function addTarget(rid){const r=rules.find(r=>r.id===rid);if(!r)return;r.targets.push({wheel:'',segment:'',strength:0});rerenderBody(rid);}
@@ -234,6 +238,37 @@ function updateTarget(rid,i,field,val){
   const r=rules.find(r=>r.id===rid);if(!r)return;
   r.targets[i][field]=val;
   if(field==='wheel'){r.targets[i].segment='';const s=document.getElementById('tarseg-'+rid+'-'+i);if(s)s.innerHTML=segOpts(val,'');}
+  updateSummary(rid);updateStats();
+}
+function addLevel(rid){
+  const r=rules.find(r=>r.id===rid);if(!r)return;
+  if(!Array.isArray(r.levels))r.levels=[];
+  r.levels.push([{wheel:'',segment:''}]);
+  rerenderBody(rid);
+}
+function removeLevel(rid,li){
+  const r=rules.find(r=>r.id===rid);if(!r||!Array.isArray(r.levels)||r.levels.length<=1)return;
+  r.levels.splice(li,1);
+  rerenderBody(rid);
+}
+function addLevelCondition(rid,li){
+  const r=rules.find(r=>r.id===rid);if(!r||!r.levels||!r.levels[li])return;
+  r.levels[li].push({wheel:'',segment:''});
+  rerenderBody(rid);
+}
+function removeLevelCondition(rid,li,ci){
+  const r=rules.find(r=>r.id===rid);if(!r||!r.levels||!r.levels[li]||r.levels[li].length<=1)return;
+  r.levels[li].splice(ci,1);
+  rerenderBody(rid);
+}
+function updateLevelCondition(rid,li,ci,field,val){
+  const r=rules.find(r=>r.id===rid);if(!r||!r.levels||!r.levels[li]||!r.levels[li][ci])return;
+  r.levels[li][ci][field]=val;
+  if(field==='wheel'){
+    r.levels[li][ci].segment='';
+    const s=document.getElementById('lseg-'+rid+'-'+li+'-'+ci);
+    if(s)s.innerHTML=segOpts(val,'');
+  }
   updateSummary(rid);updateStats();
 }
 function updateTargetStr(rid,i,val){
@@ -289,7 +324,7 @@ function buildCard(r,num){
   card.className='rule-card'+(r.expanded?' open':'')+(r.enabled?'':' disabled');
   card.id='rc-'+r.id;
   const sum=getSummary(r);
-  const filled=r.triggers.some(t=>t.wheel&&t.segment)&&r.targets.some(t=>t.wheel&&t.segment);
+  const filled=ruleIsFilled(r);
   card.innerHTML=`
     <div class="rule-header" onclick="toggleExpand(${r.id})">
       <span class="rule-num">#${num}</span>
@@ -307,15 +342,64 @@ function buildCard(r,num){
 
 function buildBodyHTML(r){
   const id=r.id;
-  const trigRows=r.triggers.map((t,i)=>`
-    <div class="trig-row">
-      <select onchange="updateTrigger(${id},${i},'wheel',this.value)">
-        <option value="">— Wheel —</option>
-        ${WHEEL_IDS.map(w=>`<option value="${w}"${t.wheel===w?' selected':''}>${WHEELS[w].name}</option>`).join('')}
-      </select>
-      <select id="tseg-${id}-${i}" onchange="updateTrigger(${id},${i},'segment',this.value)">${segOpts(t.wheel,t.segment)}</select>
-      <button class="btn-icon" onclick="removeTrigger(${id},${i})"${r.triggers.length<=1?' disabled':''}>✕</button>
-    </div>`).join('');
+  let triggerSection;
+  if(r.logic==='LEVELS'){
+    if(!Array.isArray(r.levels)||!r.levels.length)r.levels=[[{wheel:'',segment:''}]];
+    const levelBlocks=r.levels.map((level,li)=>{
+      const condRows=level.map((t,ci)=>`
+        <div class="trig-row">
+          <select onchange="updateLevelCondition(${id},${li},${ci},'wheel',this.value)">
+            <option value="">— Wheel —</option>
+            ${WHEEL_IDS.map(w=>`<option value="${w}"${t.wheel===w?' selected':''}>${WHEELS[w].name}</option>`).join('')}
+          </select>
+          <select id="lseg-${id}-${li}-${ci}" onchange="updateLevelCondition(${id},${li},${ci},'segment',this.value)">${segOpts(t.wheel,t.segment)}</select>
+          <button class="btn-icon" onclick="removeLevelCondition(${id},${li},${ci})"${level.length<=1?' disabled':''}>✕</button>
+        </div>`).join('');
+      return`
+        <div class="level-group">
+          <div class="level-group-header">
+            <span>Level ${li+1}${level.length>1?' — any condition below fires this level':''}</span>
+            <button class="btn-icon" onclick="removeLevel(${id},${li})"${r.levels.length<=1?' disabled':''}>✕ Level</button>
+          </div>
+          ${condRows}
+          <button class="btn-add" onclick="addLevelCondition(${id},${li})">+ Add condition to this level</button>
+        </div>${li<r.levels.length-1?'<div class="level-and-divider">— AND —</div>':''}`;
+    }).join('');
+    triggerSection=`
+      <div class="sec-label">Trigger Conditions — Multi-Level</div>
+      <div class="logic-row">
+        <div class="logic-toggle" id="logic-${id}">
+          <button class="logic-btn" data-logic="OR" onclick="setLogic(${id},'OR')">OR</button>
+          <button class="logic-btn" data-logic="AND" onclick="setLogic(${id},'AND')">AND</button>
+          <button class="logic-btn active-levels" data-logic="LEVELS" onclick="setLogic(${id},'LEVELS')">LEVELS</button>
+        </div>
+        <span class="logic-hint">Each level ANDs with the next; conditions inside a level OR together</span>
+      </div>
+      ${levelBlocks}
+      <button class="btn-add" onclick="addLevel(${id})">+ Add Level</button>`;
+  } else {
+    const trigRows=r.triggers.map((t,i)=>`
+      <div class="trig-row">
+        <select onchange="updateTrigger(${id},${i},'wheel',this.value)">
+          <option value="">— Wheel —</option>
+          ${WHEEL_IDS.map(w=>`<option value="${w}"${t.wheel===w?' selected':''}>${WHEELS[w].name}</option>`).join('')}
+        </select>
+        <select id="tseg-${id}-${i}" onchange="updateTrigger(${id},${i},'segment',this.value)">${segOpts(t.wheel,t.segment)}</select>
+        <button class="btn-icon" onclick="removeTrigger(${id},${i})"${r.triggers.length<=1?' disabled':''}>✕</button>
+      </div>`).join('');
+    triggerSection=`
+      <div class="sec-label">Trigger Conditions</div>
+      <div class="logic-row">
+        <div class="logic-toggle" id="logic-${id}">
+          <button class="logic-btn${r.logic==='OR'?' active-or':''}" data-logic="OR" onclick="setLogic(${id},'OR')">OR</button>
+          <button class="logic-btn${r.logic==='AND'?' active-and':''}" data-logic="AND" onclick="setLogic(${id},'AND')">AND</button>
+          <button class="logic-btn" data-logic="LEVELS" onclick="setLogic(${id},'LEVELS')">LEVELS</button>
+        </div>
+        <span class="logic-hint" id="lhint-${id}">${r.logic==='OR'?'Any condition fires the rule':'All conditions must fire together'}</span>
+      </div>
+      ${trigRows}
+      <button class="btn-add" onclick="addTrigger(${id})">+ Add Trigger</button>`;
+  }
 
   const targRows=r.targets.map((t,i)=>`
     <div class="targ-row">
@@ -333,16 +417,7 @@ function buildBodyHTML(r){
 
   return`
     <div>
-      <div class="sec-label">Trigger Conditions</div>
-      <div class="logic-row">
-        <div class="logic-toggle" id="logic-${id}">
-          <button class="logic-btn${r.logic==='OR'?' active-or':''}" data-logic="OR" onclick="setLogic(${id},'OR')">OR</button>
-          <button class="logic-btn${r.logic==='AND'?' active-and':''}" data-logic="AND" onclick="setLogic(${id},'AND')">AND</button>
-        </div>
-        <span class="logic-hint" id="lhint-${id}">${r.logic==='OR'?'Any condition fires the rule':'All conditions must fire together'}</span>
-      </div>
-      ${trigRows}
-      <button class="btn-add" onclick="addTrigger(${id})">+ Add Trigger</button>
+      ${triggerSection}
     </div>
     <div>
       <div class="sec-label">Targets</div>
@@ -358,8 +433,17 @@ function buildBodyHTML(r){
 }
 
 function getSummary(r){
-  const vt=r.triggers.filter(t=>t.wheel&&t.segment);
   const va=r.targets.filter(t=>t.wheel&&t.segment);
+  if(r.logic==='LEVELS'){
+    const levels=(r.levels||[]).map(lv=>lv.filter(t=>t.wheel&&t.segment));
+    if(!levels.length||levels.some(lv=>!lv.length)||!va.length)return'Incomplete rule — fill in all levels and targets';
+    const lp=levels.map(lv=>lv.map(t=>`${WHEELS[t.wheel]?.name||t.wheel}="${t.segment}"`).join(' OR ')).join(') AND (');
+    const sc=va.filter(t=>(typeof t.strength==='number'?t.strength:0)<0).length;
+    const bc=va.filter(t=>(typeof t.strength==='number'?t.strength:0)>0).length;
+    const p=[];if(sc)p.push(`▼ ${sc} suppress`);if(bc)p.push(`▲ ${bc} boost`);
+    return`IF (${lp}) → ${p.join(', ')||'no change'}`;
+  }
+  const vt=r.triggers.filter(t=>t.wheel&&t.segment);
   if(!vt.length||!va.length)return'Incomplete rule — fill in triggers and targets';
   const tp=vt.map(t=>`${WHEELS[t.wheel]?.name||t.wheel}="${t.segment}"`).join(` ${r.logic} `);
   const sc=va.filter(t=>(typeof t.strength==='number'?t.strength:0)<0).length;
@@ -368,11 +452,16 @@ function getSummary(r){
   return`IF ${tp} → ${p.join(', ')||'no change'}`;
 }
 
+function ruleIsFilled(r){
+  const targOk=r.targets.some(t=>t.wheel&&t.segment);
+  if(r.logic==='LEVELS')return Array.isArray(r.levels)&&r.levels.length&&r.levels.every(lv=>lv.some(t=>t.wheel&&t.segment))&&targOk;
+  return r.triggers.some(t=>t.wheel&&t.segment)&&targOk;
+}
 function updateSummary(id){
   const r=rules.find(r=>r.id===id);if(!r)return;
   const el=document.getElementById('sum-'+id);if(!el)return;
   el.textContent=getSummary(r);
-  el.className='rule-summary'+(r.triggers.some(t=>t.wheel&&t.segment)&&r.targets.some(t=>t.wheel&&t.segment)?' filled':'');
+  el.className='rule-summary'+(ruleIsFilled(r)?' filled':'');
 }
 
 function updateStats(){
@@ -385,20 +474,31 @@ function updateStats(){
 }
 
 function exportJSON(){
-  // Preserve trigger groups + AND/OR logic so the wheel can evaluate multi-condition rules
+  // Preserve trigger groups + AND/OR logic, or multi-level structure, so the wheel can evaluate the rule correctly
   const out=[];
   rules.forEach(r=>{
-    const vt=r.triggers.filter(t=>t.wheel&&t.segment);
     const va=r.targets.filter(t=>t.wheel&&t.segment);
-    if(!vt.length||!va.length) return;
-    out.push({
-      enabled:r.enabled!==false,
-      logic:r.logic||'OR',
-      triggers:vt.map(t=>({wheel:t.wheel,segment:t.segment})),
-      targets:va.map(t=>({wheel:t.wheel,segment:t.segment,strength:(typeof t.strength==='number'?t.strength:0)}))
-    });
+    if(!va.length) return;
+    if(r.logic==='LEVELS'){
+      const levels=(r.levels||[]).map(lv=>lv.filter(t=>t.wheel&&t.segment)).filter(lv=>lv.length);
+      if(!levels.length || levels.length!==(r.levels||[]).length) return;
+      out.push({
+        enabled:r.enabled!==false,
+        levels:levels.map(lv=>lv.map(t=>({wheel:t.wheel,segment:t.segment}))),
+        targets:va.map(t=>({wheel:t.wheel,segment:t.segment,strength:(typeof t.strength==='number'?t.strength:0)}))
+      });
+    } else {
+      const vt=r.triggers.filter(t=>t.wheel&&t.segment);
+      if(!vt.length) return;
+      out.push({
+        enabled:r.enabled!==false,
+        logic:r.logic||'OR',
+        triggers:vt.map(t=>({wheel:t.wheel,segment:t.segment})),
+        targets:va.map(t=>({wheel:t.wheel,segment:t.segment,strength:(typeof t.strength==='number'?t.strength:0)}))
+      });
+    }
   });
-  const data={version:'2.2',exported:new Date().toISOString(),rules:out};
+  const data={version:'3.0',exported:new Date().toISOString(),rules:out};
   document.getElementById('exportText').value=JSON.stringify(data,null,2);
   document.getElementById('exportPanel').classList.add('show');
   document.getElementById('exportPanel').scrollIntoView({behavior:'smooth'});
